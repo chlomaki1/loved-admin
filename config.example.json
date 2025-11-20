@@ -1,0 +1,13 @@
+{
+    "lovedApiKey": "<YOUR_LOVED_API_KEY>",
+    "bot": {
+        "id": 0,
+        "secret": "<YOUR_BOT_SECRET>"
+    },
+    "database": {
+        "host": "localhost",
+        "user": "loved_admin",
+        "password": null,
+        "database": "loved_admin"
+    }
+}
