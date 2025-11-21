@@ -55,13 +55,12 @@ export async function template(file: string, objectData: Record<string, any>): P
     let content = await fs.readFile(join(__dirname, '..', 'templates', file + ".md"), 'utf-8');
 
     return content
-        .replace(/<\?([^>]+)>/g, (_, expression: string) => {
+        .replace(/<\?([\s\S]*?)\?>/gm, (_, expression: string) => {
             // evaluate the expression
             let data: any = { ...objectData }; // make data available in eval scope
-            return eval(`${expression}`);
+            return eval(`${expression}`) ?? "";
         })
         .replace(/<=([^>]+)>/g, (_, key: string) => {
-            console.log(key);
             const keys = key.trim().split('.');
             let value: any = objectData;
 
@@ -75,4 +74,10 @@ export async function template(file: string, objectData: Record<string, any>): P
         
             return value;
         });
+}
+
+export function joinList(array: string[]): string {
+	return array.length < 3
+		? array.join(' and ')
+		: array.slice(0, -1).join(', ') + ', and ' + array.at(-1);
 }
