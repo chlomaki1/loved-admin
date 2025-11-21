@@ -10,7 +10,7 @@ export interface LovedRoundResponse {
     discord_webhooks: string[];
     nominations: Nomination[];
     results_post_ids?: Record<string, number | null>;
-    round?: RoundMeta;
+    round: RoundMeta;
 }
 
 export interface Nomination {

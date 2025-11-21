@@ -55,3 +55,16 @@ export interface UserSummary {
     id: number;
     name?: string;
 }
+
+export function getLongNameForGamemode(mode: Gamemode): string {
+    switch (mode) {
+        case Gamemode.Standard:
+            return "osu!";
+        case Gamemode.Taiko:
+            return "osu!taiko";
+        case Gamemode.Catch:
+            return "osu!catch";
+        case Gamemode.Mania:
+            return "osu!mania";
+    }
+}
