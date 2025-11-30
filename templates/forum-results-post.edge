@@ -1,0 +1,20 @@
+Here are the results!
+@unless(passed.length == 0 && failed.length == 0)
+@if (passed.length > 0)
+The following maps reached the {{ metadata.threshold }} threshold needed to be moved to Loved this round:
+@each(result in passed)
+[b][color=#22DD22]{{ result.data.ratio }}[/color][/b] ({{ result.data.yes_votes }}:{{ result.data.no_votes }}) - [b][url={{ osu_url }}/beatmapsets/{{ result.beatmapset.id }}#{{ result.game_mode }}]{{ result.artist}} - {{ result.title }}[/url][/b] by {{ result.creators }}
+@end
+@end
+@if (failed.length > 0)
+The following maps [b]did not[/b] reach the {{ metadata.threshold }}, so they will not be moved to Loved:
+@each(result in failed)
+[b][color=#DD2222]{{ result.data.ratio }}[/color][b] ({{ result.data.yes_votes }}:{{ result.data.no_votes }}) - [b][url={{ osu_url }}/beatmapsets/{{ result.beatmapset.id }}#{{ result.game_mode}}]{{ result.artist}} - {{ result.title }}[/url][/b] by {{ result.creators }}
+@end
+@end
+@else
+This should not be possible. If you see this, then that means something has gone [b]very[/b] wrong.
+Please contact a developer at Project Loved if you do.
+@end
+
+[b]<3[/b]

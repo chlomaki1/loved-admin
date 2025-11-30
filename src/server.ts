@@ -1,7 +1,7 @@
 import express from "express";
 import checkKey from "./middleware/checkKey";
 import pinoHttp from "pino-http";
-import { logger } from "../lib/util";
+import { init, logger } from "../lib/util";
 import pino from "pino";
 
 // - ROUTERS
@@ -40,4 +40,7 @@ server.use("/nominations", nominationsRouter);
 // - START SERVER
 server.listen(9500, () => {
     logger.info("Server is running on port 9500");
+
+    init()
+        .then(() => logger.info("Successfully initialized server state and data"))
 })

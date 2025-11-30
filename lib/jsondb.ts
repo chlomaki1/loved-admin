@@ -20,6 +20,16 @@ export async function getMainThreadMeta(roundId: number, mode: number) {
     return db[`${roundId}:${mode}`] ?? null;
 }
 
+export async function getMainThreadsForRound(roundId: number): Promise<Record<number, { topic_id: number; post_id: number; created_at?: string }>> {
+  const db = await ensureDb();
+  const out: Record<number, { topic_id: number; post_id: number; created_at?: string }> = {};
+  for (const [key, val] of Object.entries(db)) {
+    const [r, m] = key.split(':');
+    if (Number(r) === roundId) out[Number(m)] = val;
+  }
+  return out;
+}
+
 export async function setMainThreadMeta(roundId: number, mode: number, meta: { topic_id: number; post_id: number; created_at?: string }) {
     const db = await ensureDb();
     db[`${roundId}:${mode}`] = { ...meta, created_at: meta.created_at ?? new Date().toISOString() };

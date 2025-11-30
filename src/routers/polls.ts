@@ -5,11 +5,11 @@ import { LovedAdmin } from "../../lib/loved";
 import configData from "../../config.json";
 import { Gamemode, getApiNameForGamemode, getLongNameForGamemode, UserSummary } from "../../lib/types/osu-types";
 import { OsuAPIExtra } from "../../lib/osu";
-import { getMainThreadMeta, setMainThreadMeta } from "../../lib/jsondb";
+import { getMainThreadMeta, getMainThreadsForRound, setMainThreadMeta } from "../../lib/jsondb";
 import { getCurrenetUser as getCurrentUser } from "../middleware/checkKey";
 import { query } from "../../lib/database";
 import { LogType, Poll } from "../../lib/types/loved-types";
-import { body } from "express-validator";
+import { body, matchedData, validationResult } from "express-validator";
 
 const router = Router();
 
@@ -31,7 +31,6 @@ router.post(
             }
 
             const nominations = roundData.nominations.filter(n => n.game_mode == mode);
-
             if (nominations.length === 0) {
                 continue;
             }
@@ -42,9 +41,10 @@ router.post(
             const childThreadIds: Record<number, number> = {};
             let anyChildUpdated = false;
             const existingPolls = await query<Poll>(
-                "SELECT * FROM polls WHERE round_id = ?",
+                "SELECT * FROM polls WHERE round_id = ? AND game_mode = ?",
                 [
-                    roundData.round.id
+                    roundData.round.id,
+                    mode
                 ]
             )
 
@@ -245,18 +245,214 @@ router.post(
 )
 
 router.post(
-    "/:roundId/end",
-    [
-        body("steps")
-            .isArray()
-            .custom((value) => value.every((item: any) => typeof item === 'string')) // Custom check for string type
-            .default([ "finalize", "message"])
-    ],
+    "/:roundId/end/forum",
     asyncHandler(async (req, res) => {
-        const osu = await getOsuApi();
         const self = await getCurrentUser(res);
+        const osu = await getOsuApi();
+        const publicOsu = await getPublicOsuApi();
+        const now = new Date();
         const roundData = await LovedAdmin.getRound(req.params.roundId);
 
+        // process forum results
+        // then post them on the main threads for the round
+        const results = [];
+
+        for (const nomination of roundData.nominations) {
+            if (req.query.force == "1") {
+                // this is a means to force an end to a round's polls,
+                // ignoring whatever the end date is
+
+                // note: this only works if you have direct access to
+                // the osu!web instance--because even if you try to run
+                // this, it'll still just get stuck at "unexpected" poll
+                // data
+                if (nomination.poll == null) {
+                    return res.status(422).json({
+                        success: false,
+                        message: "a nomination is missing a poll, thus this round cannot be forcibly closed"
+                    });
+                }
+            } else {
+                if (nomination.poll == null || new Date(nomination.poll.ended_at!) > now) {
+                    return res.status(422).json({
+                        success: false,
+                        message: "polls for this round are not yet complete"
+                    });
+                } else if (nomination.poll.result_no != null || nomination.poll.result_yes != null) {
+                    return res.status(422).json({
+                        success: false,
+                        message: "poll results have already been processed and stored on the forum"
+                    });
+                }
+            }
+
+            const thread = await publicOsu.getForumTopic(nomination.poll.topic_id!);
+
+            if (
+                thread.topic.poll == null
+                || thread.topic.poll.options.length != 2
+                || thread.topic.poll.options[0]?.text.bbcode != "Yes"
+                || thread.topic.poll.options[1]?.text.bbcode != "No"
+                || thread.topic.poll.options[0]?.vote_count == null
+                || thread.topic.poll.options[1]?.vote_count == null
+            ) {
+                return res.status(422).json({
+                    success: false,
+                    message: "unexpected topic poll data encountered for nomination #" + nomination.id,
+                    data: {
+                        thread
+                    }
+                });
+            }
+
+            const poll = thread.topic.poll!;
+            const yesVotes = poll.options[0]?.vote_count ?? 0;
+            const noVotes = poll.options[1]?.vote_count ?? 0;
+            const threshold = roundData.round.game_modes[String(nomination.game_mode)]?.voting_threshold ?? 0;
+
+            results.push({
+                nomination,
+                poll: nomination.poll!,
+                game_mode: getApiNameForGamemode(nomination.game_mode),
+                artist: nomination.overwrite_artist ?? nomination.beatmapset.artist,
+                title: nomination.overwrite_title ?? nomination.beatmapset.title,
+                beatmapset: nomination.beatmapset,
+                thread,
+                creators: joinList(nomination.beatmapset_creators.map((c) =>
+                    c.id >= 4294000000
+                        ? c.name ?? "Unknown Creator"
+                        : `[url=${configData.osu.url}/users/${c.id}]${c.name}[/url]`
+                )),
+                data: {
+                    yes_votes: yesVotes,
+                    no_votes: noVotes,
+                    ratio: yesVotes / (noVotes + yesVotes),
+                    passed: (yesVotes / (noVotes + yesVotes)) >= threshold
+                }
+            });
+        }
+
+        // post it in reverse so that modes are sorted in-order
+        for (const [_, value] of Object.entries(Gamemode).reverse()) {
+            const mode = value as Gamemode;
+
+            if (getLongNameForGamemode(mode) == undefined) {
+                // the number keys return undefined, so its best to ignore them
+                continue;
+            }
+
+            const mainThread = await getMainThreadMeta(roundData.round.id, mode);
+            const modeResults = results.filter(r => r.nomination.game_mode == mode);
+            const threshold = (roundData.round.game_modes[String(mode)]?.voting_threshold ?? 0) * 100;
+
+            if (modeResults.length == 0) {
+                continue;
+            }
+
+            const resultPost = await osu.replyForumTopic(
+                mainThread.topic_id,
+                await template("forum-results-post", {
+                    osu_url: configData.osu.url,
+                    loved_url: configData.loved.url,
+                    passed: modeResults.filter((m) => m.data.passed),
+                    failed: modeResults.filter((m) => !m.data.passed),
+                    metadata: {
+                        threshold: `${threshold || "N/A"}%`,
+                    }
+                })
+            );
+
+            for (const result of modeResults) {
+                const nomination = result.nomination;
+
+                await osu.replyForumTopic(
+                    result.thread.topic,
+                    result.data.passed
+                        ? "This map passed the voting! It will be moved to Loved soon."
+                        : "This map did not pass the voting."
+                );
+
+                await query(
+                    `
+                        UPDATE polls
+                        SET 
+                            result_yes = ?,
+                            result_no = ?
+                        WHERE id = ?
+                    `,
+                    [result.data.yes_votes, result.data.no_votes, result.poll.id]
+                );
+
+                await OsuAPIExtra.lockThread(result.thread.topic.id);
+                await LovedAdmin.log(
+                    LogType.pollUpdated,
+                    {
+                        actor: self!.toLogUser(),
+                        beatmapset: {
+                            artist: nomination.overwrite_artist ?? nomination.beatmapset.artist,
+                            id: nomination.beatmapset_id,
+                            title: nomination.overwrite_title ?? nomination.beatmapset.title,
+                        },
+                        gameMode: nomination.game_mode,
+                        poll: {
+                            id: result.poll.id,
+                            topic_id: result.thread.topic.id,
+                        },
+                        round: {
+                            id: nomination.round_id,
+                            name: roundData.round.name
+                        }
+                    }
+                );
+            }
+
+            await OsuAPIExtra.pinThread(mainThread.topic_id, true);
+            await OsuAPIExtra.lockThread(mainThread.topic_id);
+            await query(
+                `
+                    UPDATE round_game_modes
+                    SET results_post_id = ?
+                    WHERE
+                        round_id = ?
+                        AND game_mode = ?
+                `,
+                [resultPost.id, roundData.round.id, mode]
+            );
+        }
+
+        return res.status(200).json({
+            success: true
+        })
+    })
+);
+
+router.post(
+    "/:roundId/end/chat",
+    asyncHandler(async (req, res) => {
+        const self = await getCurrentUser(res);
+        const osu = await getOsuApi();
+        const now = new Date();
+        const roundData = await LovedAdmin.getRound(req.params.roundId);
+
+        // process forum results
+        // then post them on the main threads for the round
+        const mainThreads = getMainThreadsForRound(req.params.roundId);
+
+        for (const nomination of roundData.nominations) {
+            if (nomination.poll == null || new Date(nomination.poll.ended_at!) > now) {
+                return res.status(422).json({
+                    success: false,
+                    message: "polls for this round are not yet complete"
+                });
+            } else if (nomination.poll.result_no != null || nomination.poll.result_yes != null) {
+                return res.status(422).json({
+                    success: false,
+                    message: "poll results have already been processed and stored on the forum"
+                });
+            }
+
+            const poll = nomination.poll;
+        }
     })
 );
 export default router;

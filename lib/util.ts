@@ -15,6 +15,9 @@ export const logger = pino({
     }
 })
 
+export async function init() {
+}
+
 export async function getOsuApi() {
     const osu = await loadESMModule<typeof import("osu-api-v2-js")>("osu-api-v2-js");
     
