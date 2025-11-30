@@ -79,7 +79,7 @@ router.post(
                 });
             }
 
-            // reuse the samemain thread if we already have metadata stored,
+            // reuse the same main thread if we already have metadata stored,
             // otherwise create and store it
             let mainThread: any;
             const stored = await getMainThreadMeta(roundData.round.id, Number(mode));
@@ -153,27 +153,6 @@ router.post(
                             }
                         })
                     }
-
-                    LovedAdmin.log(
-                        LogType.pollUpdated,
-                        {
-                            actor: self!.toLogUser(),
-                            beatmapset: {
-                                artist: nomination.overwrite_artist ?? nomination.beatmapset.artist,
-                                id: nomination.beatmapset_id,
-                                title: nomination.overwrite_title ?? nomination.beatmapset.title,
-                            },
-                            gameMode: nomination.game_mode,
-                            poll: {
-                                id: existing.id,
-                                topic_id: existing.topic_id
-                            },
-                            round: {
-                                id: nomination.round_id,
-                                name: roundData.round.name
-                            }
-                        }
-                    )
 
                     // reuse existing topic id
                     childThreadIds[nominationPost.id] = existing.topic_id;
