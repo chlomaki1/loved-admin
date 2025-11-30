@@ -1,6 +1,6 @@
 import { Router } from "express";
 import asyncHandler from "../middleware/asyncHandler";
-import { escapeMarkdown, expandBbcodeRootLinks, expandNominationMetadata, formatUserUrltIncaseNonexistentUser, getOsuApi, getPublicOsuApi, joinList, template } from "../../lib/util";
+import { escapeMarkdown, expandBbcodeRootLinks, expandNominationMetadata, formatUserUrltIncaseNonexistentUser, getOsuApi, getPublicOsuApi, joinList, template, unique } from "../../lib/util";
 import { LovedAdmin } from "../../lib/loved";
 import configData from "../../config.json";
 import { Gamemode, getApiNameForGamemode, getLongNameForGamemode, UserSummary } from "../../lib/types/osu-types";
@@ -438,25 +438,72 @@ router.post(
         const now = new Date();
         const roundData = await LovedAdmin.getRound(req.params.roundId);
 
-        // process forum results
-        // then post them on the main threads for the round
-        const mainThreads = getMainThreadsForRound(req.params.roundId);
-
+        // validate that all polls are complete and have results
         for (const nomination of roundData.nominations) {
-            if (nomination.poll == null || new Date(nomination.poll.ended_at!) > now) {
+            if (req.query.force == "1") {
+                // this is a means to force an end to a round's polls,
+                // ignoring whatever the end date is
+
+                // note: this only works if you have direct access to
+                // the osu!web instance--because even if you try to run
+                // this, it'll still just get stuck at "unexpected" poll
+                // data
+                if (nomination.poll == null) {
+                    return res.status(422).json({
+                        success: false,
+                        message: "a nomination is missing a poll, thus this round cannot be forcibly closed"
+                    });
+                }
+            } else if (nomination.poll == null || new Date(nomination.poll.ended_at!) > now) {
                 return res.status(422).json({
                     success: false,
                     message: "polls for this round are not yet complete"
                 });
-            } else if (nomination.poll.result_no != null || nomination.poll.result_yes != null) {
-                return res.status(422).json({
-                    success: false,
-                    message: "poll results have already been processed and stored on the forum"
-                });
             }
-
-            const poll = nomination.poll;
         }
+
+        // build results array with vote counts and pass/fail status
+        const results = [];
+        const passedCreatorIds: number[] = [];
+
+        for (const nomination of roundData.nominations) {
+            const poll = nomination.poll!;
+            const threshold = roundData.round.game_modes[String(nomination.game_mode)]?.voting_threshold ?? 0;
+            const yesVotes = poll.result_yes ?? 0;
+            const noVotes = poll.result_no ?? 0;
+            const totalVotes = yesVotes + noVotes;
+            const passed = totalVotes > 0 && (yesVotes / totalVotes) >= threshold;
+
+            results.push({
+                nomination,
+                passed,
+                yes_votes: yesVotes,
+                no_votes: noVotes
+            });
+
+            if (passed) {
+                // collect all creators involved in this nomination
+                passedCreatorIds.push(nomination.beatmapset.creator_id);
+                for (const creator of nomination.beatmapset_creators) {
+                    if (!creator.banned && creator.id < 4294000000) {
+                        passedCreatorIds.push(creator.id);
+                    }
+                }
+            }
+        }
+
+        // send chat announcement to all creators whose nominations passed
+        const uniqueCreatorIds = unique([ ...passedCreatorIds, roundData.round.news_author_id! ]);
+        if (uniqueCreatorIds.length > 0) {
+            await osu.createChatAnnouncementChannel({
+                name: "Project Loved result",
+                description: "Your map passed Loved voting!"
+            }, uniqueCreatorIds, "Congratulations, your map passed voting in the last round of Project Loved! It will be moved to the Loved category soon.");
+        }
+
+        return res.status(200).json({
+            success: true
+        })
     })
 );
 export default router;
