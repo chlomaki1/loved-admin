@@ -327,6 +327,7 @@ router.post(
                     yes_votes: yesVotes,
                     no_votes: noVotes,
                     ratio: yesVotes / (noVotes + yesVotes),
+                    ratio_text: ((yesVotes / (noVotes + yesVotes)) * 100) + "%",
                     passed: (yesVotes / (noVotes + yesVotes)) >= threshold
                 }
             });
@@ -349,13 +350,16 @@ router.post(
                 continue;
             }
 
+            const passed = modeResults.filter((m) => m.data.passed == true);
+            const failed = modeResults.filter((m) => m.data.passed == false);
             const resultPost = await osu.replyForumTopic(
                 mainThread.topic_id,
                 await template("forum-results-post", {
                     osu_url: configData.osu.url,
                     loved_url: configData.loved.url,
-                    passed: modeResults.filter((m) => m.data.passed),
-                    failed: modeResults.filter((m) => !m.data.passed),
+                    impossible: (passed.length == 0) && (failed.length == 0),
+                    passed,
+                    failed,
                     metadata: {
                         threshold: `${threshold || "N/A"}%`,
                     }
