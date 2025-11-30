@@ -156,6 +156,23 @@ export function formatDuration(totalSeconds: number): string {
     return `${sec}`;
 }
 
+export function unique<T>(items: T[]): T[] {
+    return Array.from(new Set(items));
+}
+
+export function uniqueBy<T, K>(items: T[], keySelector: (item: T) => K): T[] {
+    const seen = new Set<K>();
+    const out: T[] = [];
+    for (const it of items) {
+        const k = keySelector(it);
+        if (!seen.has(k)) {
+            seen.add(k);
+            out.push(it);
+        }
+    }
+    return out;
+}
+
 export function shouldReverseExclude<T extends { excluded?: number | boolean }>(items: T[]): boolean {
     const len = items.length;
     if (len === 0) return false;

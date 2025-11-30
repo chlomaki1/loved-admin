@@ -9,6 +9,7 @@ import { getMainThreadMeta, setMainThreadMeta } from "../../lib/jsondb";
 import { getCurrenetUser as getCurrentUser } from "../middleware/checkKey";
 import { query } from "../../lib/database";
 import { LogType, Poll } from "../../lib/types/loved-types";
+import { body } from "express-validator";
 
 const router = Router();
 
@@ -121,7 +122,6 @@ router.post(
                 // try to find an existing poll for this nomination
                 // update existing posts if anything's potentially changed
                 const existing = existingPolls.find(p => p.beatmapset_id === nominationPost.nomination.beatmapset_id);
-                const nomination = nominationPost.nomination;
 
                 const rendered = (await template("forum-child-thread", {
                     osu_url: configData.osu.url,
@@ -244,4 +244,19 @@ router.post(
     })
 )
 
+router.post(
+    "/:roundId/end",
+    [
+        body("steps")
+            .isArray()
+            .custom((value) => value.every((item: any) => typeof item === 'string')) // Custom check for string type
+            .default([ "finalize", "message"])
+    ],
+    asyncHandler(async (req, res) => {
+        const osu = await getOsuApi();
+        const self = await getCurrentUser(res);
+        const roundData = await LovedAdmin.getRound(req.params.roundId);
+
+    })
+);
 export default router;

@@ -1,0 +1,13 @@
+Hi! Your map of [{{ beatmapset.artist }} - {{ beatmapset.title }}]({{ osu_url }}/beatmapsets/{{ beatmapset.id }}), which has been nominated to be up for voting in the **{{ round.name }}** round of Project Loved. {{ metadata.gamemodes.length > 1 ? "Polls" : "A poll" }} will be opened **{{ metadata.poll_start_guess }}** to see if the community wants your map Loved.
+
+@if(metadata.gamemodes.length > 1)
+Your map is being nominated for **{{ metadata.gamemode_names }}**. If its polls receive enough "Yes" votes (listed below), it can be moved to the Loved category! Note that even if some modes don't pass the voting, the passing ones can be moved to Loved, and you don't need to delete any difficulties.
+
+{{ metadata.thresholds }}
+@else
+Your map is being nominated for **{{ metadata.gamemode_names }}**. If its poll receives **{{ metadata.thresholds }}** or more "Yes" votes, it can be moved to the Loved category!
+@end
+
+@if(beatmapset.excluded.length > 0)
+{{ beatmapset.excluded }} will be left unranked regardless of the voting.
+@end
