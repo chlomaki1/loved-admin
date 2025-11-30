@@ -17,7 +17,9 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "edge.js": "^6.3.0",
     "express": "^5.1.0",
+    "express-validator": "^7.3.1",
     "mysql2": "^3.15.3",
     "osu-api-v2-js": "^2.1.5",
     "pino": "^10.1.0",

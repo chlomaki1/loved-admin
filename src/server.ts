@@ -7,6 +7,8 @@ import pino from "pino";
 // - ROUTERS
 import adminRouter from "./routers/admin";
 import chatRouter from "./routers/chat";
+import pollsRouter from "./routers/polls";
+import nominationsRouter from "./routers/nominations";
 
 // - APPLICATION
 const server = express();
@@ -32,6 +34,8 @@ server.use(pinoHttp({
 server.use(checkKey);
 server.use("/admin", adminRouter);
 server.use("/chat", chatRouter);
+server.use("/polls", pollsRouter);
+server.use("/nominations", nominationsRouter);
 
 // - START SERVER
 server.listen(9500, () => {

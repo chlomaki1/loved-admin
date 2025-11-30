@@ -68,3 +68,16 @@ export function getLongNameForGamemode(mode: Gamemode): string {
             return "osu!mania";
     }
 }
+
+export function getApiNameForGamemode(mode: Gamemode): string {
+    switch (mode) {
+        case Gamemode.Standard:
+            return "osu";
+        case Gamemode.Taiko:
+            return "taiko";
+        case Gamemode.Catch:
+            return "fruits";
+        case Gamemode.Mania:
+            return "mania";
+    }
+}

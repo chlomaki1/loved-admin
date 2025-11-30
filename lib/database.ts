@@ -25,6 +25,26 @@ export async function queryOne<T>(sql: string, values?: unknown[]): Promise<T | 
     });
 }
 
+export async function insert(table: string, data: Record<string, unknown>): Promise<number> {
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    const placeholders = keys.map(() => "?").join(", ");
+    const sql = `INSERT INTO ${table} (${keys.map((k) => `\`${k}\``).join(", ")}) VALUES (${placeholders})`;
+
+    return runStatement<number>(sql, async (statement) => {
+        const result = await statement.execute(values) as any;
+        return result[0]?.insertId ?? 0;
+    });
+}
+
+export async function remove(table: string, where: Record<string, unknown>): Promise<void> {
+    const keys = Object.keys(where);
+    const values = Object.values(where);
+    const conditions = keys.map(key => `${key} = ?`).join(" AND ");
+
+    return execute(`DELETE FROM ${table} WHERE ${conditions}`, values);
+}
+
 export async function execute(sql: string, values?: unknown[]): Promise<void> {
     return runStatement<void>(sql, async (statement) => {
         await statement.execute(values);
