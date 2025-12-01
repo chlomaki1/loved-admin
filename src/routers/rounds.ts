@@ -54,6 +54,7 @@ router.post(
         const alreadyHandledMapsets: number[] = [];
         const messageTemplates = ["chat-nomination-template-one", "chat-nomination-template-two"];
         const messages = [];
+        const actions: any[] = [];
 
         // workflow:
         // * iterate through all nominations, collecting all nominations with the same beatmapset
@@ -147,17 +148,36 @@ router.post(
                 }))
             }
 
+            const recipients = unique([beatmapset.creator_id, ...creatorsToNotify, roundData.round.news_author_id!]);
+
             if (!data.dry_run) {
                 // send message to everybody involved
                 const channel = await osu.createChatAnnouncementChannel({
                     name: "Project Loved nomination",
                     description: "Your map has been nominated for the next round of Project Loved!"
-                }, unique([beatmapset.creator_id, ...creatorsToNotify, roundData.round.news_author_id!]), messagesToSend[0]!);
+                }, recipients, messagesToSend[0]!);
 
                 await osu.sendChatMessage(
                     channel,
                     messagesToSend[1]!
                 );
+            } else {
+                actions.push({
+                    type: 'chat.createAnnouncementChannel',
+                    data: {
+                        channel: {
+                            name: "Project Loved nomination",
+                            description: "Your map has been nominated for the next round of Project Loved!"
+                        },
+                        recipients: recipients,
+                        messages: messagesToSend
+                    },
+                    metadata: {
+                        nomination_id: nomination.id,
+                        beatmapset_id: beatmapsetId,
+                        modes: modesNominated
+                    }
+                });
             }
 
             alreadyHandledMapsets.push(beatmapsetId);
@@ -165,14 +185,15 @@ router.post(
                 id: nomination.id,
                 beatmapset_id: beatmapsetId,
                 messages: messagesToSend,
-                recipients: unique([beatmapset.creator_id, ...creatorsToNotify, roundData.round.news_author_id!]),
+                recipients: recipients,
             });
         }
 
         res.json({
             success: true,
             data: {
-                messages
+                messages,
+                actions: data.dry_run ? actions : undefined
             }
         });
     })

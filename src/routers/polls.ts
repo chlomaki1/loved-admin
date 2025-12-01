@@ -246,7 +246,26 @@ router.post(
 
 router.post(
     "/:roundId/end/forum",
+    [
+        body("dry_run", "the `dry_run` parameter must be a boolean")
+            .isBoolean()
+            .optional()
+            .default(false),
+    ],
     asyncHandler(async (req, res) => {
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(422).json({
+                success: false,
+                message: "one or more things are wrong with the body provided by this request",
+                data: {
+                    errors: errors.array()
+                }
+            });
+        }
+
+        const data = matchedData<{ dry_run?: boolean }>(req);
         const self = await getCurrentUser(res);
         const osu = await getOsuApi();
         const publicOsu = await getPublicOsuApi();
@@ -256,6 +275,7 @@ router.post(
         // process forum results
         // then post them on the main threads for the round
         const results = [];
+        const actions: any[] = [];
 
         for (const nomination of roundData.nominations) {
             if (req.query.force == "1") {
@@ -352,87 +372,216 @@ router.post(
 
             const passed = modeResults.filter((m) => m.data.passed == true);
             const failed = modeResults.filter((m) => m.data.passed == false);
-            const resultPost = await osu.replyForumTopic(
-                mainThread.topic_id,
-                await template("forum-results-post", {
-                    osu_url: configData.osu.url,
-                    loved_url: configData.loved.url,
-                    impossible: (passed.length == 0) && (failed.length == 0),
-                    passed,
-                    failed,
+            const resultPostContent = await template("forum-results-post", {
+                osu_url: configData.osu.url,
+                loved_url: configData.loved.url,
+                impossible: (passed.length == 0) && (failed.length == 0),
+                passed,
+                failed,
+                metadata: {
+                    threshold: `${threshold || "N/A"}%`,
+                }
+            });
+
+            let resultPost: any = null;
+            if (!data.dry_run) {
+                resultPost = await osu.replyForumTopic(
+                    mainThread.topic_id,
+                    resultPostContent
+                );
+            } else {
+                actions.push({
+                    type: 'forum.replyTopic',
+                    data: {
+                        topic_id: mainThread.topic_id,
+                        content: resultPostContent
+                    },
                     metadata: {
-                        threshold: `${threshold || "N/A"}%`,
+                        mode,
+                        mainThread
                     }
-                })
-            );
+                });
+            }
 
             for (const result of modeResults) {
                 const nomination = result.nomination;
+                const replyMessage = result.data.passed
+                    ? "This map passed the voting! It will be moved to Loved soon."
+                    : "This map did not pass the voting.";
 
-                await osu.replyForumTopic(
-                    result.thread.topic,
-                    result.data.passed
-                        ? "This map passed the voting! It will be moved to Loved soon."
-                        : "This map did not pass the voting."
-                );
+                if (!data.dry_run) {
+                    await osu.replyForumTopic(
+                        result.thread.topic,
+                        replyMessage
+                    );
+
+                    await query(
+                        `
+                            UPDATE polls
+                            SET 
+                                result_yes = ?,
+                                result_no = ?
+                            WHERE id = ?
+                        `,
+                        [result.data.yes_votes, result.data.no_votes, result.poll.id]
+                    );
+
+                    await OsuAPIExtra.lockThread(result.thread.topic.id);
+                    await LovedAdmin.log(
+                        LogType.pollUpdated,
+                        {
+                            actor: self!.toLogUser(),
+                            beatmapset: {
+                                artist: nomination.overwrite_artist ?? nomination.beatmapset.artist,
+                                id: nomination.beatmapset_id,
+                                title: nomination.overwrite_title ?? nomination.beatmapset.title,
+                            },
+                            gameMode: nomination.game_mode,
+                            poll: {
+                                id: result.poll.id,
+                                topic_id: result.thread.topic.id,
+                            },
+                            round: {
+                                id: nomination.round_id,
+                                name: roundData.round.name
+                            }
+                        }
+                    );
+                } else {
+                    actions.push({
+                        type: 'forum.replyTopic',
+                        data: {
+                            topic_id: result.thread.topic.id,
+                            content: replyMessage
+                        },
+                        metadata: {
+                            nomination_id: nomination.id,
+                            beatmapset_id: nomination.beatmapset_id,
+                            passed: result.data.passed
+                        }
+                    });
+                    actions.push({
+                        type: 'database.query',
+                        data: {
+                            sql: 'UPDATE polls SET result_yes = ?, result_no = ? WHERE id = ?',
+                            params: [result.data.yes_votes, result.data.no_votes, result.poll.id]
+                        },
+                        metadata: {
+                            poll_id: result.poll.id,
+                            yes_votes: result.data.yes_votes,
+                            no_votes: result.data.no_votes
+                        }
+                    });
+                    actions.push({
+                        type: 'forum.lockThread',
+                        data: {
+                            topic_id: result.thread.topic.id
+                        },
+                        metadata: {
+                            nomination_id: nomination.id
+                        }
+                    });
+                    actions.push({
+                        type: 'log.pollUpdated',
+                        data: {
+                            actor: self!.toLogUser(),
+                            beatmapset: {
+                                artist: nomination.overwrite_artist ?? nomination.beatmapset.artist,
+                                id: nomination.beatmapset_id,
+                                title: nomination.overwrite_title ?? nomination.beatmapset.title,
+                            },
+                            gameMode: nomination.game_mode,
+                            poll: {
+                                id: result.poll.id,
+                                topic_id: result.thread.topic.id,
+                            },
+                            round: {
+                                id: nomination.round_id,
+                                name: roundData.round.name
+                            }
+                        },
+                        metadata: {}
+                    });
+                }
+            }
+
+            if (!data.dry_run) {
+                await OsuAPIExtra.pinThread(mainThread.topic_id, true);
+                await OsuAPIExtra.lockThread(mainThread.topic_id);
 
                 await query(
                     `
-                        UPDATE polls
-                        SET 
-                            result_yes = ?,
-                            result_no = ?
-                        WHERE id = ?
+                        UPDATE round_game_modes
+                        SET results_post_id = ?
+                        WHERE
+                            round_id = ?
+                            AND game_mode = ?
                     `,
-                    [result.data.yes_votes, result.data.no_votes, result.poll.id]
+                    [resultPost.id, roundData.round.id, mode]
                 );
-
-                await OsuAPIExtra.lockThread(result.thread.topic.id);
-                await LovedAdmin.log(
-                    LogType.pollUpdated,
-                    {
-                        actor: self!.toLogUser(),
-                        beatmapset: {
-                            artist: nomination.overwrite_artist ?? nomination.beatmapset.artist,
-                            id: nomination.beatmapset_id,
-                            title: nomination.overwrite_title ?? nomination.beatmapset.title,
-                        },
-                        gameMode: nomination.game_mode,
-                        poll: {
-                            id: result.poll.id,
-                            topic_id: result.thread.topic.id,
-                        },
-                        round: {
-                            id: nomination.round_id,
-                            name: roundData.round.name
-                        }
+            } else {
+                actions.push({
+                    type: 'forum.pinThread',
+                    data: {
+                        topic_id: mainThread.topic_id,
+                        pin: true
+                    },
+                    metadata: { mode }
+                });
+                actions.push({
+                    type: 'forum.lockThread',
+                    data: {
+                        topic_id: mainThread.topic_id
+                    },
+                    metadata: { mode }
+                });
+                actions.push({
+                    type: 'database.query',
+                    data: {
+                        sql: 'UPDATE round_game_modes SET results_post_id = ? WHERE round_id = ? AND game_mode = ?',
+                        params: [null, roundData.round.id, mode]
+                    },
+                    metadata: {
+                        mode,
+                        round_id: roundData.round.id
                     }
-                );
+                });
             }
-
-            await OsuAPIExtra.pinThread(mainThread.topic_id, true);
-            await OsuAPIExtra.lockThread(mainThread.topic_id);
-            await query(
-                `
-                    UPDATE round_game_modes
-                    SET results_post_id = ?
-                    WHERE
-                        round_id = ?
-                        AND game_mode = ?
-                `,
-                [resultPost.id, roundData.round.id, mode]
-            );
         }
 
         return res.status(200).json({
-            success: true
+            success: true,
+            data: {
+                results,
+                actions: data.dry_run ? actions : undefined
+            }
         })
     })
 );
 
 router.post(
     "/:roundId/end/chat",
+    [
+        body("dry_run", "the `dry_run` parameter must be a boolean")
+            .isBoolean()
+            .optional()
+            .default(false),
+    ],
     asyncHandler(async (req, res) => {
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(422).json({
+                success: false,
+                message: "one or more things are wrong with the body provided by this request",
+                data: {
+                    errors: errors.array()
+                }
+            });
+        }
+
+        const data = matchedData<{ dry_run?: boolean }>(req);
+
         const self = await getCurrentUser(res);
         const osu = await getOsuApi();
         const now = new Date();
@@ -494,15 +643,43 @@ router.post(
 
         // send chat announcement to all creators whose nominations passed
         const uniqueCreatorIds = unique([ ...passedCreatorIds, roundData.round.news_author_id! ]);
+        const message = "Congratulations, your map passed voting in the last round of Project Loved! It will be moved to the Loved category soon.";
+        const actions: any[] = [];
+
         if (uniqueCreatorIds.length > 0) {
-            await osu.createChatAnnouncementChannel({
-                name: "Project Loved result",
-                description: "Your map passed Loved voting!"
-            }, uniqueCreatorIds, "Congratulations, your map passed voting in the last round of Project Loved! It will be moved to the Loved category soon.");
+            if (!data.dry_run) {
+                await osu.createChatAnnouncementChannel({
+                    name: "Project Loved result",
+                    description: "Your map passed Loved voting!"
+                }, uniqueCreatorIds, message);
+            } else {
+                actions.push({
+                    type: 'chat.createAnnouncementChannel',
+                    data: {
+                        channel: {
+                            name: "Project Loved result",
+                            description: "Your map passed Loved voting!"
+                        },
+                        recipients: uniqueCreatorIds,
+                        message: message
+                    },
+                    metadata: {
+                        passed_count: results.filter(r => r.passed).length,
+                        total_count: results.length
+                    }
+                });
+            }
         }
 
         return res.status(200).json({
-            success: true
+            success: true,
+            data: {
+                message: {
+                    recipients: uniqueCreatorIds,
+                    content: message
+                },
+                actions: data.dry_run ? actions : undefined
+            }
         })
     })
 );
