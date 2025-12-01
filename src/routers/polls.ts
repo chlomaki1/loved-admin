@@ -15,11 +15,32 @@ const router = Router();
 
 router.post(
     "/:roundId/start",
+    [
+        body("dry_run", "the `dry_run` parameter must be a boolean")
+            .isBoolean()
+            .optional()
+            .default(false),
+    ],
     asyncHandler(async (req, res) => {
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(422).json({
+                success: false,
+                message: "one or more things are wrong with the body provided by this request",
+                data: {
+                    errors: errors.array()
+                }
+            });
+        }
+
+        const data = matchedData<{ dry_run?: boolean }>(req);
         const osu = await getOsuApi();
         const publicOsu = await getPublicOsuApi();
         const self = await getCurrentUser(res);
         const roundData = await LovedAdmin.getRound(req.params.roundId);
+
+        const actions: any[] = [];
 
         // post it in reverse so that modes are sorted in-order
         for (const [_, value] of Object.entries(Gamemode).reverse()) {
@@ -87,34 +108,54 @@ router.post(
             if (stored && stored.topic_id && stored.post_id) {
                 mainThread = { topic: { id: stored.topic_id }, post: stored.post_id };
             } else {
-                const created = await osu.createForumTopic(
-                    configData.osu.forumId,
-                    `[${getLongNameForGamemode(mode)}] Project Loved: ${roundData.round.name}`,
-                    await template("forum-main-thread", {
-                        osu_url: configData.osu.url,
-                        loved_url: configData.loved.url,
-                        link_name: getApiNameForGamemode(mode),
-                        last_results_post_id: roundData.results_post_ids?.[mode],
-                        threshold: `${threshold || "N/A"}%`,
-                        captains: joinList(nominators.map((nm) => `[url=${configData.osu.url}/users/${nm.id}]${nm.name}[/url]`)),
-                        beatmapsets: nominations.map((n) => {
-                            return {
-                                id: n.beatmapset_id,
-                                creators: joinList(n.beatmapset_creators.map((c) =>
-                                    formatUserUrltIncaseNonexistentUser(c))),
-                                song: `${escapeMarkdown(n.overwrite_artist || n.beatmapset.artist)} - ${escapeMarkdown(n.overwrite_title || n.beatmapset.title)}`
-                            }
-                        })
+                const mainThreadContent = await template("forum-main-thread", {
+                    osu_url: configData.osu.url,
+                    loved_url: configData.loved.url,
+                    link_name: getApiNameForGamemode(mode),
+                    last_results_post_id: roundData.results_post_ids?.[mode],
+                    threshold: `${threshold || "N/A"}%`,
+                    captains: joinList(nominators.map((nm) => `[url=${configData.osu.url}/users/${nm.id}]${nm.name}[/url]`)),
+                    beatmapsets: nominations.map((n) => {
+                        return {
+                            id: n.beatmapset_id,
+                            creators: joinList(n.beatmapset_creators.map((c) =>
+                                formatUserUrltIncaseNonexistentUser(c))),
+                            song: `${escapeMarkdown(n.overwrite_artist || n.beatmapset.artist)} - ${escapeMarkdown(n.overwrite_title || n.beatmapset.title)}`
+                        }
                     })
-                );
+                });
 
-                mainThread = created;
-                // store main thread metadata for future runs
-                try {
-                    await setMainThreadMeta(roundData.round.id, Number(mode), { topic_id: created.topic.id, post_id: (created.post?.id ?? created.post) as number });
-                } catch (e) {
-                    // non-fatal: continue without persistence if writing fails
-                    console.warn('Failed to persist main thread metadata', e);
+                if (!data.dry_run) {
+                    const created = await osu.createForumTopic(
+                        configData.osu.forumId,
+                        `[${getLongNameForGamemode(mode)}] Project Loved: ${roundData.round.name}`,
+                        mainThreadContent
+                    );
+
+                    mainThread = created;
+                    // store main thread metadata for future runs
+                    try {
+                        await setMainThreadMeta(roundData.round.id, Number(mode), { topic_id: created.topic.id, post_id: (created.post?.id ?? created.post) as number });
+                    } catch (e) {
+                        // non-fatal: continue without persistence if writing fails
+                        console.warn('Failed to persist main thread metadata', e);
+                    }
+                } else {
+                    actions.push({
+                        type: 'forum.createTopic',
+                        data: {
+                            forum_id: configData.osu.forumId,
+                            title: `[${getLongNameForGamemode(mode)}] Project Loved: ${roundData.round.name}`,
+                            content: mainThreadContent
+                        },
+                        metadata: {
+                            mode,
+                            round_id: roundData.round.id,
+                            is_main_thread: true
+                        }
+                    });
+                    // simulate main thread for dry run
+                    mainThread = { topic: { id: -1 }, post: -1 };
                 }
             }
 
@@ -134,24 +175,52 @@ router.post(
                     // update existing thread/post instead of creating a new one
                     const existingThread = await publicOsu.getForumTopic(existing.topic_id)
 
-                    try {
-                        // attempt to edit the existing post/topic
-                        // note: osu API client expects a post id for editing; stored value is topic_id
-                        // we try using the stored topic id which should work for updating the first post
-                        await osu.editForumPost(existingThread.posts[0]?.id!, rendered);
-                        await osu.editForumTopicTitle(existingThread.topic.id,
-                            `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`)
-                        anyChildUpdated = true;
-                    } catch (err) {
-                        // if editing failed, don't create a new thread--just tank the loss
-                        // and say we failed to update it
-                        return res.status(500).json({
-                            success: false,
-                            message: "an internal server error prevented threads from being updated. if you see this, please ping yuki about it!",
+                    if (!data.dry_run) {
+                        try {
+                            // attempt to edit the existing post/topic
+                            // note: osu API client expects a post id for editing; stored value is topic_id
+                            // we try using the stored topic id which should work for updating the first post
+                            await osu.editForumPost(existingThread.posts[0]?.id!, rendered);
+                            await osu.editForumTopicTitle(existingThread.topic.id,
+                                `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`)
+                            anyChildUpdated = true;
+                        } catch (err) {
+                            // if editing failed, don't create a new thread--just tank the loss
+                            // and say we failed to update it
+                            return res.status(500).json({
+                                success: false,
+                                message: "an internal server error prevented threads from being updated. if you see this, please ping yuki about it!",
+                                data: {
+                                    error: err
+                                }
+                            })
+                        }
+                    } else {
+                        actions.push({
+                            type: 'forum.editPost',
                             data: {
-                                error: err
+                                post_id: existingThread.posts[0]?.id!,
+                                content: rendered
+                            },
+                            metadata: {
+                                nomination_id: nominationPost.id,
+                                beatmapset_id: nominationPost.nomination.beatmapset_id,
+                                mode
                             }
-                        })
+                        });
+                        
+                        actions.push({
+                            type: 'forum.editTopicTitle',
+                            data: {
+                                topic_id: existingThread.topic.id,
+                                title: `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`
+                            },
+                            metadata: {
+                                nomination_id: nominationPost.id,
+                                mode
+                            }
+                        });
+                        anyChildUpdated = true;
                     }
 
                     // reuse existing topic id
@@ -159,87 +228,191 @@ router.post(
                 } else if (existing && !existing.topic_id) {
                     // found a DB record but no topic id stored - treat as no existing thread
                     // fall through to create new thread and update DB below
-                    const thread = await osu.createForumTopic(
-                        configData.osu.forumId,
-                        `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`,
-                        rendered,
-                        {
-                            hide_results: true,
-                            length_days: 10,
-                            vote_change: true,
-                            options: ["Yes", "No"],
-                            title: `Should ${nominationPost.artist} - ${nominationPost.title} be Loved?`,
-                            max_options: 1
-                        }
-                    );
+                    if (!data.dry_run) {
+                        const thread = await osu.createForumTopic(
+                            configData.osu.forumId,
+                            `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`,
+                            rendered,
+                            {
+                                hide_results: true,
+                                length_days: 10,
+                                vote_change: true,
+                                options: ["Yes", "No"],
+                                title: `Should ${nominationPost.artist} - ${nominationPost.title} be Loved?`,
+                                max_options: 1
+                            }
+                        );
 
-                    await query("UPDATE polls SET topic_id = ? WHERE beatmapset_id = ? AND round_id = ?", [
-                        thread.topic.id,
-                        nominationPost.nomination.beatmapset_id,
-                        roundData.round.id
-                    ]);
+                        await query("UPDATE polls SET topic_id = ? WHERE beatmapset_id = ? AND round_id = ?", [
+                            thread.topic.id,
+                            nominationPost.nomination.beatmapset_id,
+                            roundData.round.id
+                        ]);
 
-                    childThreadIds[nominationPost.id] = thread.topic.id;
+                        childThreadIds[nominationPost.id] = thread.topic.id;
+                    } else {
+                        actions.push({
+                            type: 'forum.createTopic',
+                            data: {
+                                forum_id: configData.osu.forumId,
+                                title: `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`,
+                                content: rendered,
+                                poll: {
+                                    hide_results: true,
+                                    length_days: 10,
+                                    vote_change: true,
+                                    options: ["Yes", "No"],
+                                    title: `Should ${nominationPost.artist} - ${nominationPost.title} be Loved?`,
+                                    max_options: 1
+                                }
+                            },
+                            metadata: {
+                                nomination_id: nominationPost.id,
+                                beatmapset_id: nominationPost.nomination.beatmapset_id,
+                                mode
+                            }
+                        });
+                        actions.push({
+                            type: 'database.query',
+                            data: {
+                                sql: 'UPDATE polls SET topic_id = ? WHERE beatmapset_id = ? AND round_id = ?',
+                                params: [null, nominationPost.nomination.beatmapset_id, roundData.round.id]
+                            },
+                            metadata: {
+                                beatmapset_id: nominationPost.nomination.beatmapset_id
+                            }
+                        });
+                        childThreadIds[nominationPost.id] = -1;
+                    }
                     anyChildUpdated = true;
                 } else {
                     // no existing poll -> create thread and poll as before
-                    const thread = await osu.createForumTopic(
-                        configData.osu.forumId,
-                        `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`,
-                        rendered,
-                        {
-                            hide_results: true,
-                            length_days: 10,
-                            vote_change: true,
-                            options: ["Yes", "No"],
-                            title: `Should ${nominationPost.artist} - ${nominationPost.title} be Loved?`,
-                            max_options: 1
-                        }
-                    )
+                    if (!data.dry_run) {
+                        const thread = await osu.createForumTopic(
+                            configData.osu.forumId,
+                            `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`,
+                            rendered,
+                            {
+                                hide_results: true,
+                                length_days: 10,
+                                vote_change: true,
+                                options: ["Yes", "No"],
+                                title: `Should ${nominationPost.artist} - ${nominationPost.title} be Loved?`,
+                                max_options: 1
+                            }
+                        )
 
-                    childThreadIds[nominationPost.id] = thread.topic.id;
+                        childThreadIds[nominationPost.id] = thread.topic.id;
 
-                    // create poll for the nomination
-                    await LovedAdmin.createPoll(
-                        self!,
-                        // @ts-ignore // this is probably fine
-                        roundData.round,
-                        nominationPost.nomination,
-                        thread.topic
-                    );
+                        // create poll for the nomination
+                        await LovedAdmin.createPoll(
+                            self!,
+                            // @ts-ignore // this is probably fine
+                            roundData.round,
+                            nominationPost.nomination,
+                            thread.topic
+                        );
+                    } else {
+                        actions.push({
+                            type: 'forum.createTopic',
+                            data: {
+                                forum_id: configData.osu.forumId,
+                                title: `[${getLongNameForGamemode(mode)}] ${nominationPost.artist} - ${nominationPost.title}`,
+                                content: rendered,
+                                poll: {
+                                    hide_results: true,
+                                    length_days: 10,
+                                    vote_change: true,
+                                    options: ["Yes", "No"],
+                                    title: `Should ${nominationPost.artist} - ${nominationPost.title} be Loved?`,
+                                    max_options: 1
+                                }
+                            },
+                            metadata: {
+                                nomination_id: nominationPost.id,
+                                beatmapset_id: nominationPost.nomination.beatmapset_id,
+                                mode
+                            }
+                        });
+                        actions.push({
+                            type: 'database.createPoll',
+                            data: {
+                                round: roundData.round,
+                                nomination: nominationPost.nomination,
+                                topic_id: null
+                            },
+                            metadata: {
+                                nomination_id: nominationPost.id,
+                                mode
+                            }
+                        });
+                        childThreadIds[nominationPost.id] = -1;
+                    }
                     anyChildUpdated = true;
                 }
             }
 
             // modify the main thread after every nomination has been posted
             // pin it at the same time
-            await OsuAPIExtra.pinThread(mainThread.topic.id);
+            if (!data.dry_run) {
+                await OsuAPIExtra.pinThread(mainThread.topic.id);
+            } else {
+                actions.push({
+                    type: 'forum.pinThread',
+                    data: {
+                        topic_id: mainThread.topic.id,
+                        pin: true
+                    },
+                    metadata: { mode, is_main_thread: true }
+                });
+            }
+
             if (anyChildUpdated) {
-                await osu.editForumPost(
-                    mainThread.post,
-                    await template("forum-main-thread-with-child-links", {
-                        osu_url: configData.osu.url,
-                        loved_url: configData.loved.url,
-                        link_name: getApiNameForGamemode(mode),
-                        last_results_post_id: roundData.results_post_ids?.[mode],
-                        threshold: `${threshold || "N/A"}%`,
-                        captains: joinList(nominators.map((nm) => `[url=${configData.osu.url}/users/${nm.id}]${nm.name}[/url]`)),
-                        beatmapsets: nominations.map((n) => {
-                            return {
-                                id: n.beatmapset_id,
-                                creators: joinList(n.beatmapset_creators.map((c) =>
-                                    formatUserUrltIncaseNonexistentUser(c))),
-                                song: `${escapeMarkdown(n.overwrite_artist || n.beatmapset.artist)} - ${escapeMarkdown(n.overwrite_title || n.beatmapset.title)}`,
-                                thread_id: childThreadIds[n.id]
-                            }
-                        })
+                const mainThreadWithLinks = await template("forum-main-thread-with-child-links", {
+                    osu_url: configData.osu.url,
+                    loved_url: configData.loved.url,
+                    link_name: getApiNameForGamemode(mode),
+                    last_results_post_id: roundData.results_post_ids?.[mode],
+                    threshold: `${threshold || "N/A"}%`,
+                    captains: joinList(nominators.map((nm) => `[url=${configData.osu.url}/users/${nm.id}]${nm.name}[/url]`)),
+                    beatmapsets: nominations.map((n) => {
+                        return {
+                            id: n.beatmapset_id,
+                            creators: joinList(n.beatmapset_creators.map((c) =>
+                                formatUserUrltIncaseNonexistentUser(c))),
+                            song: `${escapeMarkdown(n.overwrite_artist || n.beatmapset.artist)} - ${escapeMarkdown(n.overwrite_title || n.beatmapset.title)}`,
+                            thread_id: childThreadIds[n.id]
+                        }
                     })
-                )
+                });
+
+                if (!data.dry_run) {
+                    await osu.editForumPost(
+                        mainThread.post,
+                        mainThreadWithLinks
+                    );
+                } else {
+                    actions.push({
+                        type: 'forum.editPost',
+                        data: {
+                            post_id: mainThread.post,
+                            content: mainThreadWithLinks
+                        },
+                        metadata: {
+                            mode,
+                            is_main_thread: true,
+                            child_count: nominations.length
+                        }
+                    });
+                }
             }
         }
 
         res.status(200).json({
-            success: true
+            success: true,
+            data: {
+                actions: data.dry_run ? actions : undefined
+            }
         })
     })
 )
