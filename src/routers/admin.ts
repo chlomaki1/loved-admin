@@ -1,5 +1,6 @@
 import { Router } from "express";
 import fs from "fs/promises";
+import crypto from "crypto";
 import checkAdminKey from "../middleware/checkAdminKey";
 import { logger } from "../../lib/util";
 
@@ -10,13 +11,15 @@ router.use(checkAdminKey);
 router.post("/allow", (req, res) => {
     // Endpoint for allowing a specific token to
     // access every endpoint.
-    const { token } = req.body;
+    const { user } = req.body;
 
-    if (!token) {
-        return res.status(400).json({ error: "Missing token in body" });
+    if (!user || typeof user !== 'number') {
+        return res.status(400).json({ error: "missing or invalid user id in body" });
     }
 
-    const addAllowedToken = async (newToken: string) => {
+    const addAllowedToken = async (userId: number) => {
+        const token = crypto.randomBytes(48).toString('base64');
+        
         const data = await fs.readFile("approved.json", "utf-8");
         const parsed = JSON.parse(data);
         
@@ -24,13 +27,15 @@ router.post("/allow", (req, res) => {
             parsed.allowed = [];
         }
 
-        parsed.allowed.push(newToken);
+        parsed.allowed.push({ key: token, user: userId });
 
         await fs.writeFile("approved.json", JSON.stringify(parsed, null, 4), "utf-8");
+        
+        return token;
     };
     
-    addAllowedToken(token).then(() => {
-        res.status(200).json({ message: "Token allowed successfully" });
+    addAllowedToken(user).then((token) => {
+        res.status(200).json({ message: "Token allowed successfully", user, token });
     }).catch((err) => {
         logger.error(err, "Error allowing token");
         res.status(500).json({ error: "Internal server error" });

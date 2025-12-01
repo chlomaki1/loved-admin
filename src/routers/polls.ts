@@ -698,7 +698,7 @@ router.post(
                     type: 'forum.pinThread',
                     data: {
                         topic_id: mainThread.topic_id,
-                        pin: true
+                        pin: false
                     },
                     metadata: { mode }
                 });

@@ -5,14 +5,14 @@ export default function checkAdminKey(req: Request, res: Response, next: NextFun
     if (!req.headers["x-key"]) {
         return res.status(401).json({
             success: false,
-            error: "Missing key"
+            error: "are you waiting for something?"
         });
     }
 
     if (req.headers["x-key"] !== keys.adminKey) {
         return res.status(403).json({
             success: false,
-            error: "Invalid key"
+            error: "invalid key. perhaps you're waiting for someone to approve your access?"
         });
     }
 
