@@ -154,6 +154,7 @@ router.post(
                             is_main_thread: true
                         }
                     });
+                    
                     // simulate main thread for dry run
                     mainThread = { topic: { id: -1 }, post: -1 };
                 }
@@ -208,7 +209,7 @@ router.post(
                                 mode
                             }
                         });
-                        
+
                         actions.push({
                             type: 'forum.editTopicTitle',
                             data: {
