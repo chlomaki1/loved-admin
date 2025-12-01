@@ -19,7 +19,7 @@ server.use(pinoHttp({
     logger,
     customReceivedMessage: (req) => `Incoming request: ${req.method} ${req.url}`,
     customSuccessMessage: (req, res, responseTime) => `Request completed: ${req.method} ${req.url} - ${res.statusCode} in ${responseTime}ms`,
-    customErrorMessage: (req, res, error) => `Request errored: ${req.method} ${req.url} - ${res.statusCode} - Error: ${error.message}`,
+    customErrorMessage: (req, res, error) => `Request errored: ${req.method} ${req.url} - ${res.statusCode} - message: ${error.message}`,
     serializers: {
         req: pino.stdSerializers.wrapRequestSerializer((r) => {
             return {}

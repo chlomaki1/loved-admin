@@ -47,7 +47,7 @@ router.post(
         if (roundData.nominations.length === 0) {
             return res.status(400).json({
                 success: false,
-                error: "no nominations were found for this round"
+                message: "no nominations were found for this round"
             });
         }
 

@@ -15,7 +15,7 @@ export default function checkKey(req: Request, res: Response, next: NextFunction
     if (!req.headers["x-key"]) {
         return res.status(401).json({
             success: false,
-            error: "are you waiting for something?"
+            message: "are you waiting for something?"
         });
     }
 
@@ -30,7 +30,7 @@ export default function checkKey(req: Request, res: Response, next: NextFunction
     if (!allowedEntry) {
         return res.status(403).json({
             success: false,
-            error: "invalid key. perhaps you're waiting for someone to approve your access?"
+            message: "invalid key. perhaps you're waiting for someone to approve your access?"
         });
     }
 

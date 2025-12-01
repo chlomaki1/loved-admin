@@ -14,7 +14,7 @@ router.post("/allow", (req, res) => {
     const { user } = req.body;
 
     if (!user || typeof user !== 'number') {
-        return res.status(400).json({ error: "missing or invalid user id in body" });
+        return res.status(400).json({ message: "missing or invalid user id in body" });
     }
 
     const addAllowedToken = async (userId: number) => {
@@ -38,7 +38,7 @@ router.post("/allow", (req, res) => {
         res.status(200).json({ message: "Token allowed successfully", user, token });
     }).catch((err) => {
         logger.error(err, "Error allowing token");
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ message: "Internal server error" });
     });
 })
 
