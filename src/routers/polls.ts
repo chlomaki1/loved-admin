@@ -94,7 +94,7 @@ router.post(
                             id: nomination.beatmapset_id,
                             creators: joinList(nomination.beatmapset_creators.map((c) =>
                                 formatUserUrltIncaseNonexistentUser(c))),
-                            song: `${escapeMarkdown(nomination.overwrite_artist || nomination.beatmapset.artist)} - ${escapeMarkdown(nomination.overwrite_title || nomination.beatmapset.title)}`,
+                            song: `${nomination.overwrite_artist || nomination.beatmapset.artist} - ${nomination.overwrite_title || nomination.beatmapset.title}`,
                             extra_metadata: expandNominationMetadata(nomination)
                         }
                     }
@@ -120,7 +120,7 @@ router.post(
                             id: n.beatmapset_id,
                             creators: joinList(n.beatmapset_creators.map((c) =>
                                 formatUserUrltIncaseNonexistentUser(c))),
-                            song: `${escapeMarkdown(n.overwrite_artist || n.beatmapset.artist)} - ${escapeMarkdown(n.overwrite_title || n.beatmapset.title)}`
+                            song: `${n.overwrite_artist || n.beatmapset.artist} - ${n.overwrite_title || n.beatmapset.title}`
                         }
                     })
                 });
@@ -178,6 +178,7 @@ router.post(
 
                     if (!data.dry_run) {
                         try {
+                            console.log(nominationPost)
                             // attempt to edit the existing post/topic
                             // note: osu API client expects a post id for editing; stored value is topic_id
                             // we try using the stored topic id which should work for updating the first post
@@ -381,7 +382,7 @@ router.post(
                             id: n.beatmapset_id,
                             creators: joinList(n.beatmapset_creators.map((c) =>
                                 formatUserUrltIncaseNonexistentUser(c))),
-                            song: `${escapeMarkdown(n.overwrite_artist || n.beatmapset.artist)} - ${escapeMarkdown(n.overwrite_title || n.beatmapset.title)}`,
+                            song: `${n.overwrite_artist || n.beatmapset.artist} - ${n.overwrite_title || n.beatmapset.title}`,
                             thread_id: childThreadIds[n.id]
                         }
                     })

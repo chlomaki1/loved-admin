@@ -5,10 +5,36 @@ import configData from "../../config.json";
 import { body, matchedData, validationResult } from "express-validator";
 import { LovedAdmin } from "../../lib/loved";
 import { Gamemode, getLongNameForGamemode } from "../../lib/types/osu-types";
+import { getMainThreadsForRound } from "../../lib/jsondb";
 import { join } from "path";
 import { config } from "process";
 
 const router = Router();
+
+// GET /rounds/:roundId/topics
+router.get(
+    "/:roundId/topics",
+    asyncHandler(async (req, res) => {
+        const roundId = parseInt(req.params.roundId);
+        
+        if (isNaN(roundId)) {
+            return res.status(400).json({
+                success: false,
+                message: "invalid round id"
+            });
+        }
+
+        const mainThreads = await getMainThreadsForRound(roundId);
+
+        res.json({
+            success: true,
+            data: {
+                round_id: roundId,
+                topics: mainThreads
+            }
+        });
+    })
+);
 
 // POST /rounds/:roundId/messages
 interface ChatMessageData {

@@ -5,6 +5,7 @@ import { init, logger } from "../lib/util";
 import pino from "pino";
 
 // - ROUTERS
+import metaRouter from "./routers/meta";
 import adminRouter from "./routers/admin";
 import roundsRouter from "./routers/rounds";
 import pollsRouter from "./routers/polls";
@@ -29,6 +30,9 @@ server.use(pinoHttp({
         })
     }
 }));
+
+// -PUBLIC ROUTERS
+server.use("/meta", metaRouter);
 
 // - ROUTERS
 server.use(checkKey);
