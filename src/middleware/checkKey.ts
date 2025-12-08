@@ -21,11 +21,6 @@ export default function checkKey(req: Request, res: Response, next: NextFunction
 
     const apiKey = req.headers["x-key"] as string;
     
-    if (apiKey === keys.adminKey) {
-        res.locals.keyData = { key: apiKey, user: keys.adminId, isAdmin: true } as KeyData;
-        return next();
-    }
-
     const allowedEntry = keys.allowed.find((item: any) => item.key === apiKey);
     if (!allowedEntry) {
         return res.status(403).json({
@@ -34,7 +29,11 @@ export default function checkKey(req: Request, res: Response, next: NextFunction
         });
     }
 
-    res.locals.keyData = { key: apiKey, user: allowedEntry.user, isAdmin: false } as KeyData;
+    res.locals.keyData = { 
+        key: apiKey, 
+        user: allowedEntry.user, 
+        isAdmin: allowedEntry.privileged || false 
+    } as KeyData;
     next();
 }
 

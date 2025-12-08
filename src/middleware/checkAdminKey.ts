@@ -9,7 +9,10 @@ export default function checkAdminKey(req: Request, res: Response, next: NextFun
         });
     }
 
-    if (req.headers["x-key"] !== keys.adminKey) {
+    const apiKey = req.headers["x-key"] as string;
+    const allowedEntry = keys.allowed.find((item: any) => item.key === apiKey);
+    
+    if (!allowedEntry || !allowedEntry.privileged) {
         return res.status(403).json({
             success: false,
             message: "invalid key. perhaps you're waiting for someone to approve your access?"
