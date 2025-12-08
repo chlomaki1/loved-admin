@@ -168,7 +168,7 @@ router.post(
                         gamemode_names: joinList(modesNominated.map(mode => getLongNameForGamemode(mode))),
                         gamemodes: modesNominated,
                         creator_names: joinList(guestCreatorNames),
-                        thresholds: thresholds.length > 1 ? thresholds.join("\n") : thresholds[0]?.slice(2,-1),
+                        thresholds: thresholds.length > 1 ? thresholds.join("\n") : thresholds[0]?.slice(2),
                         poll_start_guess: req.body.poll_start_guess || "at an unknown date"
                     },
                 }))
