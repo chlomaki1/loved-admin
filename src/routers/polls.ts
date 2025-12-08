@@ -824,7 +824,7 @@ router.post(
         if (uniqueCreatorIds.length > 0) {
             if (!data.dry_run) {
                 await osu.createChatAnnouncementChannel({
-                    name: "Project Loved result",
+                    name: "Project Loved Result",
                     description: "Your map passed Loved voting!"
                 }, uniqueCreatorIds, message);
             } else {
@@ -832,7 +832,7 @@ router.post(
                     type: 'chat.createAnnouncementChannel',
                     data: {
                         channel: {
-                            name: "Project Loved result",
+                            name: "Project Loved Result",
                             description: "Your map passed Loved voting!"
                         },
                         recipients: uniqueCreatorIds,

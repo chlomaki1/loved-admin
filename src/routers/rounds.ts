@@ -179,7 +179,7 @@ router.post(
             if (!data.dry_run) {
                 // send message to everybody involved
                 const channel = await osu.createChatAnnouncementChannel({
-                    name: "Project Loved nomination",
+                    name: "Project Loved Nomination",
                     description: "Your map has been nominated for the next round of Project Loved!"
                 }, recipients, messagesToSend[0]!);
 
