@@ -1,8 +1,9 @@
 import express from "express";
 import checkKey from "./middleware/checkKey";
 import pinoHttp from "pino-http";
-import { init, logger } from "../lib/util";
+import { getOsuApi, init, logger } from "../lib/util";
 import pino from "pino";
+import configData from "../config.json";
 
 // - ROUTERS
 //import metaRouter from "./routers/meta";
@@ -10,6 +11,11 @@ import adminRouter from "./routers/admin";
 import roundsRouter from "./routers/rounds";
 import pollsRouter from "./routers/polls";
 import nominationsRouter from "./routers/nominations";
+
+// - META LOGIC
+if (configData.development) {
+    process.env.NODE_ENV = "development";
+}
 
 // - APPLICATION
 const server = express();
@@ -42,8 +48,8 @@ server.use("/polls", pollsRouter);
 server.use("/nominations", nominationsRouter);
 
 // - START SERVER
-server.listen(9500, () => {
-    logger.info("Server is running on port 9500");
+server.listen(configData.port, () => {
+    logger.info(`Server is running on port ${configData.port}`);
 
     init()
         .then(() => logger.info("Successfully initialized server state and data"))

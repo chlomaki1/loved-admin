@@ -15,7 +15,8 @@ export default function checkKey(req: Request, res: Response, next: NextFunction
     if (!req.headers["x-key"]) {
         return res.status(401).json({
             success: false,
-            message: "are you waiting for something?"
+            message: "are you waiting for something?",
+            development: process.env.NODE_ENV === "development"
         });
     }
 

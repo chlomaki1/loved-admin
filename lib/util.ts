@@ -33,6 +33,38 @@ export async function getOsuApi() {
         }, {
             server: config.osu.url
         })
+
+        // XD
+        // @ts-ignore
+        osuApi.refreshToken = async function () {
+            const old_token = this.access_token;
+            // @ts-ignore
+            this.is_refreshing_token = true;
+
+            try {
+                // @ts-ignore
+                await this.getAndSetToken({
+                    client_id: this.client_id,
+                    client_secret:this.client_secret,
+                    grant_type: "client_credentials",
+                    scope: "delegate chat.write chat.write_manage forum.write forum.write_manage group_permissions"
+                }, this);
+                if (old_token !== this.access_token) {
+                // @ts-ignore
+                    this.log(false, "The token has been refreshed!");
+                }
+            }
+            catch (e) {
+            // @ts-ignore
+                this.log(true, "Failed to refresh the token :(", e);
+            }
+            finally {
+            // @ts-ignore
+                this.is_refreshing_token = false;
+            }
+            
+            return old_token !== this.access_token;
+        }
     }
 
     return osuApi;

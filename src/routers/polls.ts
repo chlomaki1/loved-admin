@@ -504,6 +504,12 @@ router.post(
             const yesVotes = poll.options[0]?.vote_count ?? 0;
             const noVotes = poll.options[1]?.vote_count ?? 0;
             const threshold = roundData.round.game_modes[String(nomination.game_mode)]?.voting_threshold ?? 0;
+            const ratioText = ((yesVotes / (noVotes + yesVotes)) * 100).toFixed(2);
+
+            // truncate last two digits if they're .00
+            const ratioTextFinal = ratioText.endsWith(".00")
+                ? ratioText.slice(0, -3)
+                : ratioText;
 
             results.push({
                 nomination,
@@ -522,7 +528,7 @@ router.post(
                     yes_votes: yesVotes,
                     no_votes: noVotes,
                     ratio: yesVotes / (noVotes + yesVotes),
-                    ratio_text: ((yesVotes / (noVotes + yesVotes)) * 100) + "%",
+                    ratio_text: ratioTextFinal + "%",
                     passed: (yesVotes / (noVotes + yesVotes)) >= threshold
                 }
             });
@@ -559,23 +565,50 @@ router.post(
             });
 
             let resultPost: any = null;
+            const existingResultsPostId = roundData.round.game_modes[String(mode)]?.results_post_id;
+            
             if (!data.dry_run) {
-                resultPost = await osu.replyForumTopic(
-                    mainThread.topic_id,
-                    resultPostContent
-                );
+                if (existingResultsPostId) {
+                    // Edit existing results post
+                    await osu.editForumPost(
+                        existingResultsPostId,
+                        resultPostContent
+                    );
+                    resultPost = { id: existingResultsPostId };
+                } else {
+                    // Create new results post
+                    resultPost = await osu.replyForumTopic(
+                        mainThread.topic_id,
+                        resultPostContent
+                    );
+                }
             } else {
-                actions.push({
-                    type: 'forum.replyTopic',
-                    data: {
-                        topic_id: mainThread.topic_id,
-                        content: resultPostContent
-                    },
-                    metadata: {
-                        mode,
-                        mainThread
-                    }
-                });
+                if (existingResultsPostId) {
+                    actions.push({
+                        type: 'forum.editPost',
+                        data: {
+                            post_id: existingResultsPostId,
+                            content: resultPostContent
+                        },
+                        metadata: {
+                            mode,
+                            mainThread,
+                            is_existing_results_post: true
+                        }
+                    });
+                } else {
+                    actions.push({
+                        type: 'forum.replyTopic',
+                        data: {
+                            topic_id: mainThread.topic_id,
+                            content: resultPostContent
+                        },
+                        metadata: {
+                            mode,
+                            mainThread
+                        }
+                    });
+                }
             }
 
             for (const result of modeResults) {
@@ -684,16 +717,19 @@ router.post(
                 await OsuAPIExtra.pinThread(mainThread.topic_id, true);
                 await OsuAPIExtra.lockThread(mainThread.topic_id);
 
-                await query(
-                    `
-                        UPDATE round_game_modes
-                        SET results_post_id = ?
-                        WHERE
-                            round_id = ?
-                            AND game_mode = ?
-                    `,
-                    [resultPost.id, roundData.round.id, mode]
-                );
+                // Only update results_post_id if we created a new post
+                if (!existingResultsPostId && resultPost) {
+                    await query(
+                        `
+                            UPDATE round_game_modes
+                            SET results_post_id = ?
+                            WHERE
+                                round_id = ?
+                                AND game_mode = ?
+                        `,
+                        [resultPost.id, roundData.round.id, mode]
+                    );
+                }
             } else {
                 actions.push({
                     type: 'forum.pinThread',
@@ -710,17 +746,21 @@ router.post(
                     },
                     metadata: { mode }
                 });
-                actions.push({
-                    type: 'database.query',
-                    data: {
-                        sql: 'UPDATE round_game_modes SET results_post_id = ? WHERE round_id = ? AND game_mode = ?',
-                        params: [null, roundData.round.id, mode]
-                    },
-                    metadata: {
-                        mode,
-                        round_id: roundData.round.id
-                    }
-                });
+                
+                // Only update results_post_id if we're creating a new post
+                if (!existingResultsPostId) {
+                    actions.push({
+                        type: 'database.query',
+                        data: {
+                            sql: 'UPDATE round_game_modes SET results_post_id = ? WHERE round_id = ? AND game_mode = ?',
+                            params: [null, roundData.round.id, mode]
+                        },
+                        metadata: {
+                            mode,
+                            round_id: roundData.round.id
+                        }
+                    });
+                }
             }
         }
 

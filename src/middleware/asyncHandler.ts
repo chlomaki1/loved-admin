@@ -7,6 +7,7 @@ export default function asyncHandler<T extends Record<string, any>>(
     return (req, res, next) => {
         Promise.resolve(fn(req as Request<T>, res, next)).catch((e) => {
             logger.error(e)
+            console.log(e)
             
             res.status(500).json({
                 success: false,
